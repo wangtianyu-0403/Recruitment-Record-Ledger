@@ -122,6 +122,18 @@ Windows 也可以双击 `scripts\run_windows.bat`。macOS/Linux 可运行：
 
 ## 开发依赖和测试
 
+### 代码结构
+
+- `ui/`：窗口、表单和表格交互；`ui/local_documents.py` 统一处理本地资料打开及快捷入口。
+- `services.py`、`validation.py`：业务操作和输入校验。
+- `models.py`、`repository.py`、`database.py`：记录模型、参数化数据访问及事务式数据库升级。
+- `backup.py`、`export.py`：数据库备份恢复和 CSV 导出。
+- `paths.py`、`data_migration.py`：用户数据目录及旧产品目录迁移。
+- `update.py`：主动检查更新、下载校验和更新助手。
+- `tests/`：使用临时数据库、文件和窗口设置验证公开行为。
+
+UI 通过业务层读写记录；本地简历路径跟随记录保存，全局快捷入口属于界面设置。
+
 Windows：
 
 ```powershell
