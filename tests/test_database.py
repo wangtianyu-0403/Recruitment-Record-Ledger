@@ -105,7 +105,7 @@ def test_version_one_database_migrates_to_ordering_schema(tmp_path: Path) -> Non
         "SELECT id, is_pinned, manual_order FROM applications ORDER BY manual_order"
     ).fetchall()
     assert {"is_pinned", "manual_order"} <= columns
-    assert database.connection.execute("PRAGMA user_version").fetchone()[0] == 2
+    assert database.connection.execute("PRAGMA user_version").fetchone()[0] == 3
     assert [row["id"] for row in rows] == [3, 2, 1]
     assert all(row["is_pinned"] == 0 for row in rows)
     database.close()
@@ -145,5 +145,5 @@ def test_ordering_migration_completes_partially_added_columns(tmp_path: Path) ->
     ).fetchall()
     assert {"is_pinned", "manual_order"} <= columns
     assert [row["id"] for row in rows] == [3, 2, 1]
-    assert database.connection.execute("PRAGMA user_version").fetchone()[0] == 2
+    assert database.connection.execute("PRAGMA user_version").fetchone()[0] == 3
     database.close()

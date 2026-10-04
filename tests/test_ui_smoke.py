@@ -262,15 +262,15 @@ def test_drag_refresh_runs_after_native_move_cleanup(
     )
 
     window._rows_reordered([first, second])
-    for column in (0, 1, 2, 4, 5, 7):
+    for column in (0, 1, 2, 4, 5, 8):
         window.table.takeItem(0, column)
 
     qtbot.waitUntil(lambda: window.table.item(0, 0) is not None)
 
-    assert all(window.table.item(0, column) is not None for column in (0, 1, 2, 4, 5, 7))
+    assert all(window.table.item(0, column) is not None for column in (0, 1, 2, 4, 5, 8))
     assert window.table.cellWidget(0, 3) is not None
     assert window.table.cellWidget(0, 6) is not None
-    assert window.table.cellWidget(0, 8) is not None
+    assert window.table.cellWidget(0, window.TABLE_HEADERS.index("操作")) is not None
 
 
 def test_failed_drag_queues_refresh_after_native_move_cleanup(
@@ -290,13 +290,13 @@ def test_failed_drag_queues_refresh_after_native_move_cleanup(
     monkeypatch.setattr(QMessageBox, "critical", lambda *args: None)
 
     window._rows_reordered([second, first])
-    for column in (0, 1, 2, 4, 5, 7):
+    for column in (0, 1, 2, 4, 5, 8):
         window.table.takeItem(0, column)
 
     qtbot.waitUntil(lambda: window.table.item(0, 0) is not None)
 
     assert [record.id for record in window._records] == original_ids
-    assert all(window.table.item(0, column) is not None for column in (0, 1, 2, 4, 5, 7))
+    assert all(window.table.item(0, column) is not None for column in (0, 1, 2, 4, 5, 8))
 
 
 def test_pin_action_keeps_timestamp_and_refreshes_marker_and_button(
@@ -314,13 +314,13 @@ def test_pin_action_keeps_timestamp_and_refreshes_marker_and_button(
     qtbot.addWidget(window)
 
     qtbot.mouseClick(
-        window.table.cellWidget(0, 8).pin_button,
+        window.table.cellWidget(0, window.TABLE_HEADERS.index("操作")).pin_button,
         Qt.MouseButton.LeftButton,
     )
 
     assert service.get(application_id).updated_at == previous
     assert window.table.item(0, 0).text() == "📌 置顶公司"
-    assert window.table.cellWidget(0, 8).pin_button.text() == "取消置顶"
+    assert window.table.cellWidget(0, window.TABLE_HEADERS.index("操作")).pin_button.text() == "取消置顶"
 
 
 def test_filtered_drag_preserves_hidden_rows(
@@ -394,11 +394,11 @@ def test_main_window_contains_required_controls(
     assert window.search_edit.placeholderText()
     assert window.status_filter.itemText(0) == "全部状态"
     assert window.table.rowCount() == 1
-    action_cell = window.table.cellWidget(0, 8)
-    assert window.table.columnWidth(8) >= 230
-    assert window.table.columnWidth(8) >= action_cell.minimumSizeHint().width()
+    action_cell = window.table.cellWidget(0, window.TABLE_HEADERS.index("操作"))
+    assert window.table.columnWidth(window.TABLE_HEADERS.index("操作")) >= 230
+    assert window.table.columnWidth(window.TABLE_HEADERS.index("操作")) >= action_cell.minimumSizeHint().width()
     assert window.version_label.objectName() == "versionLabel"
-    assert window.version_label.text() == "版本v1.1.3"
+    assert window.version_label.text() == "版本v1.1.4"
     assert window.statusBar().isAncestorOf(window.version_label)
     assert window.check_update_button.text() == "检查更新"
 
@@ -415,11 +415,11 @@ def test_manual_update_check_reports_current_version(
         main_window,
         "fetch_latest_release",
         lambda: ReleaseInfo(
-            version=(1, 1, 3),
-            tag_name="v1.1.3",
+            version=(1, 1, 4),
+            tag_name="v1.1.4",
             asset_url="https://example.invalid/update.zip",
             asset_digest="sha256:" + "a" * 64,
-            html_url="https://example.invalid/v1.1.3",
+            html_url="https://example.invalid/v1.1.4",
         ),
     )
     monkeypatch.setattr(
@@ -432,7 +432,7 @@ def test_manual_update_check_reports_current_version(
 
     window.check_for_updates()
 
-    assert messages == [("检查更新", "当前已是最新版本（v1.1.3）。")]
+    assert messages == [("检查更新", "当前已是最新版本（v1.1.4）。")]
 
 
 def test_source_mode_never_installs_newer_release(

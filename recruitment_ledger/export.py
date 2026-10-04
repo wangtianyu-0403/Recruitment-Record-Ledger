@@ -23,6 +23,7 @@ CSV_HEADERS: tuple[tuple[str, str], ...] = (
     ("投递日期", "application_date"),
     ("当前进度", "status"),
     ("公司官网", "company_url"),
+    ("本地简历", "local_resume_path"),
     ("招聘页面", "recruitment_url"),
     ("工作地点", "location"),
     ("投递渠道", "channel"),

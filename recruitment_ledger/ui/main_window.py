@@ -54,6 +54,7 @@ from ..update import (
 from .application_dialog import ApplicationDialog
 from .application_table import ApplicationTableWidget
 from .history_dialog import HistoryDialog
+from .local_documents import LocalDocumentButton, open_local_path
 from .recycle_bin_dialog import RecycleBinDialog
 from .widgets import ActionCell, StatisticCard, StatusComboBox
 
@@ -74,6 +75,7 @@ class MainWindow(QMainWindow):
         "工作地点",
         "投递渠道",
         "公司官网",
+        "本地简历",
         "最后更新",
         "操作",
     )
@@ -130,7 +132,7 @@ class MainWindow(QMainWindow):
             QHeaderView.ResizeMode.Interactive
         )
         self.table.horizontalHeader().setStretchLastSection(True)
-        for index, width in enumerate((155, 180, 95, 135, 105, 105, 90, 145, 230)):
+        for index, width in enumerate((155, 180, 95, 135, 105, 105, 90, 100, 145, 230)):
             self.table.setColumnWidth(index, width)
         self.table.cellDoubleClicked.connect(self._edit_row)
         self.table.rows_reordered.connect(self._rows_reordered)
@@ -184,11 +186,15 @@ class MainWindow(QMainWindow):
             self.sort_mode_combo.addItem(label, mode.value)
         self.sort_mode_combo.setMinimumWidth(130)
         toolbar.addWidget(self.sort_mode_combo)
+        for title, key in (("个人页", "paths/personal_page"), ("简历页", "paths/resume_page")):
+            toolbar.addWidget(LocalDocumentButton(title, self.settings, key, self))
+        self.addToolBarBreak()
+        toolbar = QToolBar("操作工具栏")
+        toolbar.setMovable(False)
+        self.addToolBar(Qt.ToolBarArea.TopToolBarArea, toolbar)
         for text, callback in (
             ("刷新", self.refresh_data),
             ("导出 CSV", self.export_current),
-            ("备份数据库", self.manual_backup),
-            ("恢复数据库", self.restore_database),
             ("回收站", self.open_recycle_bin),
             ("打开数据目录", self.open_data_directory),
         ):
@@ -199,6 +205,11 @@ class MainWindow(QMainWindow):
         self.check_update_button.setObjectName("check_update_button")
         self.check_update_button.clicked.connect(self.check_for_updates)
         toolbar.addWidget(self.check_update_button)
+        toolbar.addSeparator()
+        for text, callback in (("备份数据库", self.manual_backup), ("恢复数据库", self.restore_database)):
+            button = QPushButton(text)
+            button.clicked.connect(callback)
+            toolbar.addWidget(button)
 
     def check_for_updates(self) -> None:
         QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
@@ -297,10 +308,13 @@ class MainWindow(QMainWindow):
         sort_index = self.sort_mode_combo.findData(saved_sort_mode)
         self.sort_mode_combo.setCurrentIndex(sort_index)
         widths = self.settings.value("table/column_widths")
+        if isinstance(widths, list) and len(widths) == self.table.columnCount() - 1:
+            widths = [*widths[:7], 100, *widths[7:]]
         if isinstance(widths, list) and len(widths) == self.table.columnCount():
             for column, width in enumerate(widths):
                 self.table.setColumnWidth(column, int(width))
-        self.table.setColumnWidth(8, max(230, self.table.columnWidth(8)))
+        action_column = self.TABLE_HEADERS.index("操作")
+        self.table.setColumnWidth(action_column, max(230, self.table.columnWidth(action_column)))
 
     def refresh_data(self) -> None:
         selected = self.status_filter.currentText()
@@ -339,11 +353,11 @@ class MainWindow(QMainWindow):
                 (2, record.application_date),
                 (4, record.location or "—"),
                 (5, record.channel or "—"),
-                (7, record.updated_at),
+                (8, record.updated_at),
             ):
                 self.table.setItem(row, column, QTableWidgetItem(value))
             self._add_status_combo(row, record)
-            self._add_url_button(row, record)
+            self._add_link_buttons(row, record)
             self._add_action_cell(row, record)
         self.table.setUpdatesEnabled(True)
         self.table.setVisible(bool(self._records))
@@ -382,14 +396,17 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage("岗位状态已更新", 3000)
         QTimer.singleShot(0, self.refresh_data)
 
-    def _add_url_button(self, row: int, record: ApplicationRecord) -> None:
-        button = QPushButton("打开官网" if record.company_url else "未填写")
-        button.setEnabled(bool(record.company_url))
-        if record.company_url:
-            button.clicked.connect(
-                lambda checked=False, url=record.company_url: self._open_url(url)
-            )
-        self.table.setCellWidget(row, 6, button)
+    def _add_link_buttons(self, row: int, record: ApplicationRecord) -> None:
+        for column, label, value, callback in (
+            (6, "打开官网", record.company_url, self._open_url),
+            (7, "打开简历", record.local_resume_path,
+             lambda path: open_local_path(path, self, file_only=True)),
+        ):
+            button = QPushButton(label if value else "未填写")
+            button.setEnabled(bool(value))
+            button.setToolTip(value)
+            button.clicked.connect(lambda checked=False, target=value, open_target=callback: open_target(target))
+            self.table.setCellWidget(row, column, button)
 
     def _open_url(self, url: str) -> None:
         if not QDesktopServices.openUrl(QUrl(url)):
@@ -403,7 +420,7 @@ class MainWindow(QMainWindow):
         actions.edit_requested.connect(self.edit_application)
         actions.history_requested.connect(self.show_history)
         actions.delete_requested.connect(self.delete_application)
-        self.table.setCellWidget(row, 8, actions)
+        self.table.setCellWidget(row, self.TABLE_HEADERS.index("操作"), actions)
 
     def _current_sort_mode(self) -> SortMode:
         try:
@@ -447,7 +464,7 @@ class MainWindow(QMainWindow):
     def add_application(self) -> None:
         dialog = ApplicationDialog(
             parent=self,
-            save_callback=lambda record: self.service.create(record),
+            save_callback=self.service.create,
         )
         if dialog.exec():
             self.refresh_data()
@@ -563,8 +580,7 @@ class MainWindow(QMainWindow):
         self.refresh_data()
 
     def open_data_directory(self) -> None:
-        if not QDesktopServices.openUrl(QUrl.fromLocalFile(str(self.paths.root))):
-            QMessageBox.warning(self, "打开失败", "无法使用系统文件管理器打开数据目录。")
+        open_local_path(str(self.paths.root), self)
 
     def closeEvent(self, event: QCloseEvent) -> None:
         self.settings.setValue("window/geometry", self.saveGeometry())

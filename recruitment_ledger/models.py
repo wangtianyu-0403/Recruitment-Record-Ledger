@@ -26,6 +26,7 @@ class ApplicationRecord:
     is_deleted: bool = False
     is_pinned: bool = False
     manual_order: int = 0
+    local_resume_path: str = ""
 
     @classmethod
     def from_row(cls, row: sqlite3.Row) -> "ApplicationRecord":
@@ -37,6 +38,7 @@ class ApplicationRecord:
             application_date=row["application_date"],
             status=row["status"],
             company_url=row["company_url"],
+            local_resume_path=row["local_resume_path"],
             recruitment_url=row["recruitment_url"],
             location=row["location"],
             channel=row["channel"],

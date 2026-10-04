@@ -43,6 +43,7 @@ class ApplicationRepository:
         "application_date",
         "status",
         "company_url",
+        "local_resume_path",
         "recruitment_url",
         "location",
         "channel",

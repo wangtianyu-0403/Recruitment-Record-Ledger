@@ -11,7 +11,7 @@ class DatabaseError(RuntimeError):
 
 
 class Database:
-    SCHEMA_VERSION = 2
+    SCHEMA_VERSION = 3
 
     def __init__(self, path: Path) -> None:
         self.path = path.expanduser().resolve()
@@ -53,6 +53,7 @@ class Database:
                     application_date TEXT NOT NULL,
                     status TEXT NOT NULL,
                     company_url TEXT NOT NULL DEFAULT '',
+                    local_resume_path TEXT NOT NULL DEFAULT '',
                     recruitment_url TEXT NOT NULL DEFAULT '',
                     location TEXT NOT NULL DEFAULT '',
                     channel TEXT NOT NULL DEFAULT '',
@@ -103,7 +104,7 @@ class Database:
             )
 
             version = connection.execute("PRAGMA user_version").fetchone()[0]
-            if version < self.SCHEMA_VERSION:
+            if version < 2:
                 columns = {
                     row["name"]
                     for row in connection.execute("PRAGMA table_info(applications)")
@@ -135,9 +136,18 @@ class Database:
                     ON applications(is_deleted, is_pinned DESC, manual_order, id)
                     """
                 )
-                connection.execute(
-                    f"PRAGMA user_version = {self.SCHEMA_VERSION}"
-                )
+            if version < 3:
+                columns = {
+                    row["name"]
+                    for row in connection.execute("PRAGMA table_info(applications)")
+                }
+                if "local_resume_path" not in columns:
+                    connection.execute(
+                        "ALTER TABLE applications "
+                        "ADD COLUMN local_resume_path TEXT NOT NULL DEFAULT ''"
+                    )
+            if version < self.SCHEMA_VERSION:
+                connection.execute(f"PRAGMA user_version = {self.SCHEMA_VERSION}")
             connection.commit()
         except sqlite3.Error as exc:
             if connection.in_transaction:

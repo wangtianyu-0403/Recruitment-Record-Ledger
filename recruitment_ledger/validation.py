@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import replace
 from datetime import datetime
+from pathlib import Path
 from urllib.parse import urlparse
 
 from .constants import APPLICATION_STATUSES, ISO_DATE_FORMAT
@@ -25,6 +26,20 @@ def normalize_url(value: str) -> str:
     if any(character.isspace() for character in parsed.netloc):
         raise ValidationError("网址中不能包含空格。")
     return candidate
+
+
+def normalize_local_path(value: str) -> str:
+    cleaned = value.strip()
+    if len(cleaned) >= 2 and cleaned[0] == cleaned[-1] and cleaned[0] in "\"'":
+        cleaned = cleaned[1:-1].strip()
+    if not cleaned:
+        return ""
+    if "\x00" in cleaned or "://" in cleaned:
+        raise ValidationError("请输入本地文件或文件夹路径，不能填写网址。")
+    path = Path(cleaned).expanduser()
+    if not path.is_absolute():
+        raise ValidationError("请输入完整的本地文件或文件夹路径。")
+    return str(path)
 
 
 def validate_iso_date(value: str, field_name: str, optional: bool = False) -> str | None:
@@ -55,14 +70,15 @@ def validate_application(record: ApplicationRecord) -> ApplicationRecord:
         if record.follow_up_date
         else None
     )
-    return ApplicationRecord(
-        id=record.id,
+    return replace(
+        record,
         company_name=company_name,
         position_name=position_name,
         job_description=record.job_description.strip(),
         application_date=str(application_date),
         status=record.status,
         company_url=normalize_url(record.company_url),
+        local_resume_path=normalize_local_path(record.local_resume_path),
         recruitment_url=normalize_url(record.recruitment_url),
         location=record.location.strip(),
         channel=record.channel.strip(),
@@ -71,8 +87,5 @@ def validate_application(record: ApplicationRecord) -> ApplicationRecord:
         contact_info=record.contact_info.strip(),
         notes=record.notes.strip(),
         follow_up_date=follow_up_date,
-        created_at=record.created_at,
-        updated_at=record.updated_at,
-        is_deleted=record.is_deleted,
     )
 

@@ -13,6 +13,17 @@ from recruitment_ledger.services import ApplicationService
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 
+@pytest.fixture(autouse=True)
+def isolated_window_settings(monkeypatch, tmp_path: Path) -> None:
+    from PySide6.QtCore import QSettings
+    from recruitment_ledger.ui import main_window
+
+    monkeypatch.setattr(
+        main_window, "QSettings",
+        lambda: QSettings(str(tmp_path / "window.ini"), QSettings.Format.IniFormat),
+    )
+
+
 @pytest.fixture
 def app_paths(tmp_path: Path) -> AppPaths:
     paths = AppPaths.from_root(tmp_path / "app-data")

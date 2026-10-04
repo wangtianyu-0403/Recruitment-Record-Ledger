@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from dataclasses import replace
 
 from PySide6.QtCore import QDate
 from PySide6.QtWidgets import (
@@ -65,6 +66,9 @@ class ApplicationDialog(QDialog):
         self.jd_edit.setMaximumHeight(105)
         self.company_url_edit = QLineEdit()
         self.company_url_edit.setPlaceholderText("例如 example.com")
+        self.local_resume_edit = QLineEdit()
+        self.local_resume_edit.setObjectName("local_resume_path")
+        self.local_resume_edit.setPlaceholderText("例如 C:\\简历\\个人简历.pdf")
         self.recruitment_url_edit = QLineEdit()
         self.recruitment_url_edit.setPlaceholderText("例如 https://example.com/jobs/1")
         self.location_edit = QLineEdit()
@@ -74,6 +78,17 @@ class ApplicationDialog(QDialog):
         self.salary_edit = QLineEdit()
         self.contact_name_edit = QLineEdit()
         self.contact_info_edit = QLineEdit()
+        self._text_fields = {
+            "company_name": self.company_edit,
+            "position_name": self.position_edit,
+            "company_url": self.company_url_edit,
+            "local_resume_path": self.local_resume_edit,
+            "recruitment_url": self.recruitment_url_edit,
+            "location": self.location_edit,
+            "salary": self.salary_edit,
+            "contact_name": self.contact_name_edit,
+            "contact_info": self.contact_info_edit,
+        }
         self.follow_up_enabled = QCheckBox("设置日期")
         self.follow_up_date_edit = QDateEdit(QDate.currentDate())
         self.follow_up_date_edit.setCalendarPopup(True)
@@ -98,6 +113,7 @@ class ApplicationDialog(QDialog):
         form.addRow("当前进度 *", self.status_combo)
         form.addRow("岗位 JD", self.jd_edit)
         form.addRow("公司官网", self.company_url_edit)
+        form.addRow("本地简历链接", self.local_resume_edit)
         form.addRow("招聘页面", self.recruitment_url_edit)
         form.addRow("工作地点", self.location_edit)
         form.addRow("投递渠道", self.channel_combo)
@@ -122,20 +138,14 @@ class ApplicationDialog(QDialog):
         root_layout.addWidget(buttons)
 
     def _populate(self, record: ApplicationRecord) -> None:
-        self.company_edit.setText(record.company_name)
-        self.position_edit.setText(record.position_name)
+        for field, widget in self._text_fields.items():
+            widget.setText(getattr(record, field))
         self.application_date_edit.setDate(
             QDate.fromString(record.application_date, DATE_FORMAT)
         )
         self.status_combo.setCurrentText(record.status)
         self.jd_edit.setPlainText(record.job_description)
-        self.company_url_edit.setText(record.company_url)
-        self.recruitment_url_edit.setText(record.recruitment_url)
-        self.location_edit.setText(record.location)
         self.channel_combo.setCurrentText(record.channel)
-        self.salary_edit.setText(record.salary)
-        self.contact_name_edit.setText(record.contact_name)
-        self.contact_info_edit.setText(record.contact_info)
         self.notes_edit.setPlainText(record.notes)
         if record.follow_up_date:
             self.follow_up_enabled.setChecked(True)
@@ -144,30 +154,20 @@ class ApplicationDialog(QDialog):
             )
 
     def build_record(self) -> ApplicationRecord:
-        source = self._source_record
-        return ApplicationRecord(
-            id=source.id if source else None,
-            company_name=self.company_edit.text(),
-            position_name=self.position_edit.text(),
+        source = self._source_record or ApplicationRecord("", "", "", "")
+        return replace(
+            source,
+            **{field: widget.text() for field, widget in self._text_fields.items()},
             application_date=self.application_date_edit.date().toString(DATE_FORMAT),
             status=self.status_combo.currentText(),
             job_description=self.jd_edit.toPlainText(),
-            company_url=self.company_url_edit.text(),
-            recruitment_url=self.recruitment_url_edit.text(),
-            location=self.location_edit.text(),
             channel=self.channel_combo.currentText(),
-            salary=self.salary_edit.text(),
-            contact_name=self.contact_name_edit.text(),
-            contact_info=self.contact_info_edit.text(),
             follow_up_date=(
                 self.follow_up_date_edit.date().toString(DATE_FORMAT)
                 if self.follow_up_enabled.isChecked()
                 else None
             ),
             notes=self.notes_edit.toPlainText(),
-            created_at=source.created_at if source else "",
-            updated_at=source.updated_at if source else "",
-            is_deleted=source.is_deleted if source else False,
         )
 
     def _save(self) -> None:
