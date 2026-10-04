@@ -2,6 +2,7 @@
 
 import os
 import sys
+import runpy
 from pathlib import Path
 
 # Search the interpreter and Windows directories, not other tools' DLL folders.
@@ -13,11 +14,15 @@ if sys.platform == "win32":
     )))
 
 
+version_file = Path("build/version.txt")
+version_file.parent.mkdir(parents=True, exist_ok=True)
+version_file.write_text(runpy.run_path("recruitment_ledger/constants.py")["APP_VERSION"], encoding="utf-8")
+
 a = Analysis(
     ['main.py'],
     pathex=[],
     binaries=[],
-    datas=[],
+    datas=[("scripts/sync_local_windows.ps1", "scripts"), (str(version_file), ".")],
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},

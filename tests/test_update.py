@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import zipfile
 from email.message import Message
@@ -425,16 +426,17 @@ def test_generated_updater_replaces_install_and_keeps_backup(tmp_path: Path) -> 
             str(archive),
             "-InstallDir",
             str(install_dir),
-            "-ExecutableName",
-            "招聘记录台账.exe",
             "-LogPath",
             str(log_path),
             "-NoRestart",
+            "-DesktopDir",
+            str(tmp_path / "desktop"),
         ],
         capture_output=True,
         text=True,
         timeout=30,
         check=False,
+        env={**os.environ, "LOCALAPPDATA": str(tmp_path / "local-app-data")},
     )
 
     assert result.returncode == 0, result.stderr
@@ -443,3 +445,134 @@ def test_generated_updater_replaces_install_and_keeps_backup(tmp_path: Path) -> 
     assert len(backups) == 1
     assert (backups[0] / "version.txt").read_text(encoding="utf-8") == "old-version"
     assert "更新完成" in log_path.read_text(encoding="utf-8-sig")
+
+
+def test_updater_repairs_shortcut_that_points_to_another_old_install(tmp_path: Path) -> None:
+    from test_sync_local_windows import _create_shortcut, _shortcut_target
+
+    install_dir = tmp_path / "updated-install"
+    install_dir.mkdir()
+    (install_dir / "招聘记录台账.exe").write_bytes(b"old-exe")
+    old_install = tmp_path / "another-old-install"
+    old_install.mkdir()
+    old_exe = old_install / "招聘记录台账.exe"
+    old_exe.write_bytes(b"stale-exe")
+    desktop = tmp_path / "desktop"
+    desktop.mkdir()
+    shortcut = desktop / "招聘记录台账.lnk"
+    _create_shortcut(shortcut, old_exe)
+    archive = _write_update_zip(tmp_path / "update.zip", _valid_update_members())
+    script = write_updater_script(tmp_path / "apply-update.ps1")
+    result = subprocess.run([
+        "powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(script),
+        "-ProcessId", "0", "-ArchivePath", str(archive), "-InstallDir", str(install_dir),
+        "-LogPath", str(tmp_path / "update.log"),
+        "-NoRestart", "-DesktopDir", str(desktop),
+    ], capture_output=True, text=True, timeout=30, check=False,
+        env={**os.environ, "LOCALAPPDATA": str(tmp_path / "local-app-data")})
+    assert result.returncode == 0, result.stderr
+    assert (install_dir / "version.txt").read_text(encoding="utf-8") == "new-version"
+    assert _shortcut_target(shortcut) == str(install_dir / "招聘记录台账.exe")
+
+
+def test_launch_updater_waits_for_ready_before_returning(tmp_path: Path, monkeypatch) -> None:
+    archive = _write_update_zip(tmp_path / "update.zip", _valid_update_members())
+    calls = []
+
+    class ReadyProcess:
+        def poll(self):
+            return None
+
+    def start(command, **kwargs):
+        calls.append((command, kwargs))
+        Path(command[command.index("-ReadyPath") + 1]).write_text("ready")
+        return ReadyProcess()
+
+    monkeypatch.setattr(update.subprocess, "Popen", start)
+    log = update.launch_updater(archive, tmp_path / "install")
+    command, kwargs = calls[0]
+    assert command[command.index("-ProcessId") + 1] == str(os.getpid())
+    assert kwargs["env"]["PYINSTALLER_RESET_ENVIRONMENT"] == "1"
+    assert log.name == "update.log"
+
+
+def test_launch_updater_rejects_helper_that_exits_before_ready(tmp_path: Path, monkeypatch) -> None:
+    archive = _write_update_zip(tmp_path / "update.zip", _valid_update_members())
+
+    class FailedProcess:
+        def poll(self):
+            return 1
+
+    monkeypatch.setattr(update.subprocess, "Popen", lambda *args, **kwargs: FailedProcess())
+    with pytest.raises(UpdateError, match="更新助手"):
+        update.launch_updater(archive, tmp_path / "install")
+
+
+@pytest.mark.parametrize("failure", ["version", "startup"])
+def test_updater_failure_preserves_install_and_shortcut(tmp_path: Path, failure: str) -> None:
+    from test_sync_local_windows import _create_shortcut, _shortcut_target
+
+    install = tmp_path / "install"
+    install.mkdir()
+    executable = install / "招聘记录台账.exe"
+    executable.write_bytes(b"old-exe")
+    desktop = tmp_path / "desktop"
+    desktop.mkdir()
+    shortcut = desktop / "招聘记录台账.lnk"
+    _create_shortcut(shortcut, executable)
+    original_shortcut = shortcut.read_bytes()
+    members = _valid_update_members()
+    members["招聘记录台账/_internal/version.txt"] = b"1.1.5"
+    archive = _write_update_zip(tmp_path / "update.zip", members)
+    script = write_updater_script(tmp_path / "apply-update.ps1")
+    command = [
+        "powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(script),
+        "-ProcessId", "0", "-ArchivePath", str(archive), "-InstallDir", str(install),
+        "-DesktopDir", str(desktop),
+        "-ExpectedVersion", "v1.1.6" if failure == "version" else "v1.1.5",
+        "-LogPath", str(tmp_path / "update.log"),
+    ]
+    if failure == "version":
+        command.append("-NoRestart")
+    result = subprocess.run(command, capture_output=True, timeout=30, check=False,
+        env={**os.environ, "LOCALAPPDATA": str(tmp_path / "local-app-data")})
+    assert result.returncode != 0
+    assert executable.read_bytes() == b"old-exe"
+    assert shortcut.read_bytes() == original_shortcut
+    assert _shortcut_target(shortcut) == str(executable)
+
+
+def test_updater_restarts_new_window_and_repairs_shortcut(tmp_path: Path) -> None:
+    from test_sync_local_windows import (
+        _compile_health_probe, _create_shortcut, _shortcut_target, _stop_health_probes,
+    )
+
+    probe = _compile_health_probe(tmp_path / "probe.exe", "招聘记录台账")
+    install = tmp_path / "install"
+    install.mkdir()
+    executable = install / "招聘记录台账.exe"
+    executable.write_bytes(b"old-exe")
+    desktop = tmp_path / "desktop"
+    desktop.mkdir()
+    shortcut = desktop / "招聘记录台账.lnk"
+    _create_shortcut(shortcut, tmp_path / "stale.exe")
+    members = _valid_update_members()
+    members["招聘记录台账/招聘记录台账.exe"] = probe.read_bytes()
+    members["招聘记录台账/_internal/version.txt"] = b"1.1.5"
+    archive = _write_update_zip(tmp_path / "update.zip", members)
+    script = write_updater_script(tmp_path / "apply-update.ps1")
+    try:
+        result = subprocess.run([
+            "powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(script),
+            "-ProcessId", "0", "-ArchivePath", str(archive), "-InstallDir", str(install),
+            "-DesktopDir", str(desktop),
+            "-ExpectedVersion", "v1.1.5", "-LogPath", str(tmp_path / "update.log"),
+        ], capture_output=True, timeout=30, check=False,
+            env={**os.environ, "LOCALAPPDATA": str(tmp_path / "local-app-data")})
+        assert result.returncode == 0, result.stderr
+        assert (install / "health-test.pid").exists()
+        assert executable.read_bytes() == probe.read_bytes()
+        assert _shortcut_target(shortcut) == str(executable)
+        assert "更新完成" in (tmp_path / "update.log").read_text(encoding="utf-8-sig")
+    finally:
+        _stop_health_probes(tmp_path)

@@ -3,6 +3,7 @@ param(
     [string]$InstallDir = (Join-Path $env:LOCALAPPDATA "Programs\RecruitmentRecordLedger"),
     [string]$DesktopDir = [Environment]::GetFolderPath("Desktop"),
     [string]$SourceDist = "",
+    [string]$ExpectedVersion = "",
     [switch]$SkipBuild,
     [switch]$NoLaunch
 )
@@ -190,6 +191,13 @@ try {
     if ($sourceRuntimes.Count -eq 0) {
         throw "发布目录缺少 _internal\python3NN.dll。"
     }
+    if ($ExpectedVersion) {
+        $versionPath = Join-Path $source "_internal\version.txt"
+        if (-not (Test-Path -LiteralPath $versionPath -PathType Leaf) -or
+            (Get-Content -Raw -LiteralPath $versionPath).Trim() -ne $ExpectedVersion.TrimStart('v')) {
+            throw "更新包版本与目标版本不一致，已保留旧版本。"
+        }
+    }
 
     New-Item -ItemType Directory -Force -Path $installParent, $DesktopDir | Out-Null
     $stamp = Get-Date -Format "yyyyMMdd-HHmmss-fff"
@@ -246,6 +254,7 @@ try {
         $shortcut = $shell.CreateShortcut($shortcutPath)
         $shortcut.TargetPath = $installedExe
         $shortcut.WorkingDirectory = $InstallDir
+        $shortcut.Arguments = ""
         $shortcut.IconLocation = "$($shortcut.TargetPath),0"
         $shortcut.Save()
         if (-not $shortcutPathExisted) {
@@ -253,8 +262,15 @@ try {
         }
 
         if (-not $NoLaunch) {
-            $launchedProcess = Start-Process -FilePath $installedExe `
-                -WorkingDirectory $InstallDir -PassThru
+            $previousReset = $env:PYINSTALLER_RESET_ENVIRONMENT
+            try {
+                $env:PYINSTALLER_RESET_ENVIRONMENT = "1"
+                $launchedProcess = Start-Process -FilePath $installedExe `
+                    -WorkingDirectory $InstallDir -PassThru
+            }
+            finally {
+                $env:PYINSTALLER_RESET_ENVIRONMENT = $previousReset
+            }
             Wait-ForHealthyMainWindow -Process $launchedProcess `
                 -ExpectedTitle "招聘记录台账"
             Assert-LaunchedProcessStillHealthy -Process $launchedProcess `

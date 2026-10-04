@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import json
+import os
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import zipfile
 from dataclasses import dataclass
 from hashlib import sha256
@@ -302,8 +305,10 @@ UPDATER_SCRIPT = r"""param(
     [int]$ProcessId,
     [Parameter(Mandatory=$true)][string]$ArchivePath,
     [Parameter(Mandatory=$true)][string]$InstallDir,
-    [Parameter(Mandatory=$true)][string]$ExecutableName,
     [Parameter(Mandatory=$true)][string]$LogPath,
+    [string]$DesktopDir = [Environment]::GetFolderPath("Desktop"),
+    [string]$ExpectedVersion = "",
+    [string]$ReadyPath = "",
     [switch]$NoRestart
 )
 
@@ -315,56 +320,33 @@ function Write-UpdateLog {
     Add-Content -LiteralPath $LogPath -Encoding UTF8 -Value "[$timestamp] $Message"
 }
 
-$parent = Split-Path -Parent $InstallDir
-$leaf = Split-Path -Leaf $InstallDir
-$stamp = Get-Date -Format "yyyyMMdd-HHmmss"
-$staging = Join-Path $parent "$leaf.staging-$stamp"
-$backup = Join-Path $parent "$leaf.backup-$stamp"
-$failed = Join-Path $parent "$leaf.failed-$stamp"
-
 try {
+    $syncScript = Join-Path $PSScriptRoot "sync_local_windows.ps1"
+    if (-not (Test-Path -LiteralPath $syncScript -PathType Leaf)) {
+        throw "更新助手缺少安装脚本。"
+    }
     Write-UpdateLog "等待旧程序退出。"
+    if ($ReadyPath) {
+        Set-Content -LiteralPath $ReadyPath -Value "ready" -Encoding UTF8
+    }
     if ($ProcessId -gt 0) {
         Wait-Process -Id $ProcessId -ErrorAction SilentlyContinue
     }
 
-    New-Item -ItemType Directory -Force -Path $staging | Out-Null
+    $staging = Join-Path $PSScriptRoot "extracted"
     Expand-Archive -LiteralPath $ArchivePath -DestinationPath $staging
     $newRoot = Join-Path $staging "招聘记录台账"
-    $newExe = Join-Path $newRoot "招聘记录台账.exe"
-    $newRuntimes = @(
-        Get-ChildItem -File -LiteralPath (Join-Path $newRoot "_internal") `
-            -Filter "python3*.dll" -ErrorAction SilentlyContinue |
-            Where-Object { $_.Name -match "^python3\d+\.dll$" }
-    )
-    if (-not (Test-Path -LiteralPath $newExe)) {
-        throw "更新包缺少主程序。"
+    & $syncScript -SkipBuild -SourceDist $newRoot -InstallDir $InstallDir `
+        -DesktopDir $DesktopDir -ExpectedVersion $ExpectedVersion -NoLaunch:$NoRestart `
+        *>&1 | Out-File -LiteralPath $LogPath -Append -Encoding UTF8
+    if ($LASTEXITCODE -ne 0) {
+        throw "安装或启动检查失败，已保留或恢复旧版本。"
     }
-    if ($newRuntimes.Count -eq 0) {
-        throw "更新包缺少 Python 运行时。"
-    }
-
-    if (Test-Path -LiteralPath $InstallDir) {
-        Move-Item -LiteralPath $InstallDir -Destination $backup
-    }
-    Move-Item -LiteralPath $newRoot -Destination $InstallDir
-
-    if (-not $NoRestart) {
-        Start-Process -FilePath (Join-Path $InstallDir "招聘记录台账.exe") `
-            -WorkingDirectory $InstallDir
-    }
-    Write-UpdateLog "更新完成。旧版本备份：$backup"
+    Write-UpdateLog "更新完成，快捷方式已修复。"
     exit 0
 }
 catch {
     Write-UpdateLog "更新失败：$($_.Exception.Message)"
-    if (Test-Path -LiteralPath $InstallDir) {
-        Move-Item -LiteralPath $InstallDir -Destination $failed
-    }
-    if (Test-Path -LiteralPath $backup) {
-        Move-Item -LiteralPath $backup -Destination $InstallDir
-        Write-UpdateLog "已恢复旧版本。"
-    }
     exit 1
 }
 """
@@ -374,18 +356,28 @@ def write_updater_script(script_path: Path) -> Path:
     resolved = script_path.expanduser().resolve()
     resolved.parent.mkdir(parents=True, exist_ok=True)
     resolved.write_text(UPDATER_SCRIPT, encoding="utf-8-sig")
+    resource_root = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent.parent))
+    shutil.copyfile(
+        resource_root / "scripts" / "sync_local_windows.ps1",
+        resolved.parent / "sync_local_windows.ps1",
+    )
     return resolved
 
 
 def launch_updater(
     archive_path: Path,
     install_dir: Path,
-    executable_path: Path,
+    *,
+    expected_version: str = "",
 ) -> Path:
     validate_update_archive(archive_path)
     update_dir = Path(tempfile.mkdtemp(prefix="recruitment-ledger-update-"))
-    script_path = write_updater_script(update_dir / "apply-update.ps1")
+    try:
+        script_path = write_updater_script(update_dir / "apply-update.ps1")
+    except OSError as exc:
+        raise UpdateError(f"无法准备更新助手：{exc}。日志目录：{update_dir}") from exc
     log_path = update_dir / "update.log"
+    ready_path = update_dir / "ready"
     command = [
         "powershell.exe",
         "-NoProfile",
@@ -394,24 +386,39 @@ def launch_updater(
         "-File",
         str(script_path),
         "-ProcessId",
-        str(sys.getpid()),
+        str(os.getpid()),
         "-ArchivePath",
         str(archive_path.resolve()),
         "-InstallDir",
         str(install_dir.resolve()),
-        "-ExecutableName",
-        executable_path.name,
         "-LogPath",
         str(log_path),
+        "-ReadyPath",
+        str(ready_path),
+        "-ExpectedVersion",
+        expected_version,
     ]
     creation_flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
     try:
-        subprocess.Popen(
-            command,
-            cwd=update_dir,
-            creationflags=creation_flags,
-            close_fds=True,
-        )
+        with (update_dir / "bootstrap.log").open("wb") as output:
+            process = subprocess.Popen(
+                command,
+                cwd=update_dir,
+                creationflags=creation_flags,
+                close_fds=True,
+                stdin=subprocess.DEVNULL,
+                stdout=output,
+                stderr=output,
+                env={**os.environ, "PYINSTALLER_RESET_ENVIRONMENT": "1"},
+            )
     except OSError as exc:
-        raise UpdateError(f"无法启动更新助手：{exc}") from exc
-    return log_path
+        raise UpdateError(f"无法启动更新助手：{exc}。日志目录：{update_dir}") from exc
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline:
+        if process.poll() is not None:
+            raise UpdateError(f"更新助手启动失败，当前程序仍保留。日志：{update_dir}")
+        if ready_path.exists():
+            return log_path
+        time.sleep(0.05)
+    process.terminate()
+    raise UpdateError(f"更新助手未能就绪，当前程序仍保留。日志：{update_dir}")

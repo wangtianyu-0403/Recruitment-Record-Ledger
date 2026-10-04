@@ -280,7 +280,10 @@ class MainWindow(QMainWindow):
                 "准备安装更新",
                 "更新包已验证。程序将退出、安装新版本并自动重新启动。",
             )
-            launch_updater(archive_path, install_dir, executable_path)
+            launch_updater(
+                archive_path, install_dir,
+                expected_version=release.tag_name,
+            )
         except UpdateError as exc:
             QMessageBox.critical(self, "更新失败", str(exc))
             return
