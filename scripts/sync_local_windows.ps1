@@ -162,8 +162,7 @@ try {
 
         Push-Location $repoRoot
         try {
-            & $python -m PyInstaller --noconfirm --clean --onedir --windowed `
-                --icon ".\assets\ui.ico" --name "招聘记录台账" ".\main.py"
+            & $python -m PyInstaller --noconfirm --clean ".\招聘记录台账.spec"
             if ($LASTEXITCODE -ne 0) {
                 throw "PyInstaller 打包失败。"
             }

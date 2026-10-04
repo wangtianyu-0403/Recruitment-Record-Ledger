@@ -1,5 +1,17 @@
 # -*- mode: python ; coding: utf-8 -*-
 
+import os
+import sys
+from pathlib import Path
+
+# Search the interpreter and Windows directories, not other tools' DLL folders.
+if sys.platform == "win32":
+    windows_root = Path(os.environ["SystemRoot"])
+    os.environ["PATH"] = os.pathsep.join(map(str, (
+        Path(sys.executable).parent, Path(sys.base_prefix),
+        windows_root / "System32", windows_root,
+    )))
+
 
 a = Analysis(
     ['main.py'],

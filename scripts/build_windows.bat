@@ -19,8 +19,6 @@ set QT_QPA_PLATFORM=
 if exist "build" rmdir /s /q "build"
 if exist "dist" rmdir /s /q "dist"
 
-rem Keep unrelated tools' DLLs out of PyInstaller's dependency search.
-set "PATH=%CD%\.venv\Scripts;%SystemRoot%\System32;%SystemRoot%;%SystemRoot%\System32\Wbem"
 ".venv\Scripts\python.exe" -m PyInstaller --noconfirm --clean "招聘记录台账.spec"
 if errorlevel 1 goto :error
 
