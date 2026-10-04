@@ -39,6 +39,7 @@ Windows 10/11 64 位用户可在 [Releases](https://github.com/wangtianyu-0403/R
 - 工具栏分为两行，避免新增入口被挤入溢出菜单；“备份数据库”“恢复数据库”位于操作栏末尾。
 - 复用表单字段映射和本地路径打开逻辑，使用 dataclass 更新记录时保留原记录元数据。
 - 数据库升级保留招聘记录、状态历史、置顶和手动排序。
+- Windows 打包时隔离 DLL 搜索路径，避免其他工具的同名库混入发布包。
 
 本地路径请填写完整地址，例如 `C:\简历\个人简历.pdf`，可直接粘贴 Windows“复制文件地址”得到的带引号路径。全局入口也支持文件夹；留空保存可以清除。路径失效时会提示修改，程序只保存地址，不复制或上传文件。
 
@@ -190,8 +191,8 @@ Windows 双击或在终端执行：
 scripts\build_windows.bat
 ```
 
-脚本安装开发依赖、运行完整测试，然后使用 PyInstaller
-`--onedir --windowed --icon assets\ui.ico --name "招聘记录台账"` 打包。产物位于：
+脚本安装开发依赖、运行完整测试，再隔离 DLL 搜索路径并使用仓库内的
+`招聘记录台账.spec` 进行 PyInstaller `onedir`、`windowed` 打包，图标为 `assets/ui.ico`。产物位于：
 
 ```text
 dist\招聘记录台账\招聘记录台账.exe
